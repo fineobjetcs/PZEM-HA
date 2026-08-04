@@ -1,0 +1,239 @@
+substitutions:
+  device_name: ac-tester
+  friendly_name: AC-Tester
+  # GPIO совпадают с уже распаянным модулем DMX/RS485.
+  uart_tx_pin: GPIO5
+  uart_rx_pin: GPIO6
+  pzem_address: "1"
+
+esphome:
+  name: ${device_name}
+  friendly_name: ${friendly_name}
+  comment: ESP32-S3 + PZEM-016 RS485 AC multimeter
+
+esp32:
+  board: esp32-s3-devkitc-1
+  framework:
+    type: arduino
+
+logger:
+  level: INFO
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "AC-Tester Fallback"
+    password: !secret fallback_password
+
+captive_portal:
+
+uart:
+  id: rs485_uart
+  tx_pin: ${uart_tx_pin}
+  rx_pin: ${uart_rx_pin}
+  baud_rate: 9600
+  data_bits: 8
+  parity: NONE
+  stop_bits: 1
+
+modbus:
+  id: pzem_modbus
+  uart_id: rs485_uart
+  send_wait_time: 250ms
+
+modbus_controller:
+  - id: pzem
+    address: ${pzem_address}
+    modbus_id: pzem_modbus
+    command_throttle: 100ms
+    update_interval: 2s
+
+globals:
+  - { id: voltage_min_value, type: float, restore_value: true, initial_value: 'NAN' }
+  - { id: voltage_max_value, type: float, restore_value: true, initial_value: 'NAN' }
+  - { id: current_min_value, type: float, restore_value: true, initial_value: 'NAN' }
+  - { id: current_max_value, type: float, restore_value: true, initial_value: 'NAN' }
+  - { id: power_min_value, type: float, restore_value: true, initial_value: 'NAN' }
+  - { id: power_max_value, type: float, restore_value: true, initial_value: 'NAN' }
+
+sensor:
+  # PZEM-016 input registers. Multi-register values use low-word-first order.
+  - platform: modbus_controller
+    modbus_controller_id: pzem
+    id: voltage
+    name: Voltage Current
+    address: 0x0000
+    register_type: read
+    value_type: U_WORD
+    unit_of_measurement: V
+    device_class: voltage
+    state_class: measurement
+    accuracy_decimals: 1
+    filters: [{ multiply: 0.1 }]
+    on_value:
+      then:
+        - lambda: |-
+            if (!isnan(x)) {
+              if (isnan(id(voltage_min_value)) || x < id(voltage_min_value)) id(voltage_min_value) = x;
+              if (isnan(id(voltage_max_value)) || x > id(voltage_max_value)) id(voltage_max_value) = x;
+            }
+
+  - platform: modbus_controller
+    modbus_controller_id: pzem
+    id: current
+    name: Current Current
+    address: 0x0001
+    register_count: 2
+    register_type: read
+    value_type: U_DWORD_R
+    unit_of_measurement: A
+    device_class: current
+    state_class: measurement
+    accuracy_decimals: 3
+    filters: [{ multiply: 0.001 }]
+    on_value:
+      then:
+        - lambda: |-
+            if (!isnan(x)) {
+              if (isnan(id(current_min_value)) || x < id(current_min_value)) id(current_min_value) = x;
+              if (isnan(id(current_max_value)) || x > id(current_max_value)) id(current_max_value) = x;
+            }
+
+  - platform: modbus_controller
+    modbus_controller_id: pzem
+    id: power
+    name: Power Current
+    address: 0x0003
+    register_count: 2
+    register_type: read
+    value_type: U_DWORD_R
+    unit_of_measurement: W
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 1
+    filters: [{ multiply: 0.1 }]
+    on_value:
+      then:
+        - lambda: |-
+            if (!isnan(x)) {
+              if (isnan(id(power_min_value)) || x < id(power_min_value)) id(power_min_value) = x;
+              if (isnan(id(power_max_value)) || x > id(power_max_value)) id(power_max_value) = x;
+            }
+
+  - platform: modbus_controller
+    modbus_controller_id: pzem
+    id: energy_total
+    name: Energy Total
+    address: 0x0005
+    register_count: 2
+    register_type: read
+    value_type: U_DWORD_R
+    unit_of_measurement: kWh
+    device_class: energy
+    state_class: total_increasing
+    accuracy_decimals: 3
+    filters: [{ multiply: 0.001 }]
+
+  - platform: modbus_controller
+    modbus_controller_id: pzem
+    name: Frequency
+    address: 0x0007
+    register_type: read
+    value_type: U_WORD
+    unit_of_measurement: Hz
+    device_class: frequency
+    state_class: measurement
+    accuracy_decimals: 1
+    filters: [{ multiply: 0.1 }]
+
+  - platform: modbus_controller
+    modbus_controller_id: pzem
+    name: Power Factor
+    address: 0x0008
+    register_type: read
+    value_type: U_WORD
+    device_class: power_factor
+    state_class: measurement
+    accuracy_decimals: 2
+    filters: [{ multiply: 0.01 }]
+
+  - platform: template
+    name: Voltage Minimum
+    lambda: return id(voltage_min_value);
+    update_interval: 5s
+    unit_of_measurement: V
+    device_class: voltage
+    state_class: measurement
+    accuracy_decimals: 1
+  - platform: template
+    name: Voltage Maximum
+    lambda: return id(voltage_max_value);
+    update_interval: 5s
+    unit_of_measurement: V
+    device_class: voltage
+    state_class: measurement
+    accuracy_decimals: 1
+  - platform: template
+    name: Current Minimum
+    lambda: return id(current_min_value);
+    update_interval: 5s
+    unit_of_measurement: A
+    device_class: current
+    state_class: measurement
+    accuracy_decimals: 3
+  - platform: template
+    name: Current Maximum
+    lambda: return id(current_max_value);
+    update_interval: 5s
+    unit_of_measurement: A
+    device_class: current
+    state_class: measurement
+    accuracy_decimals: 3
+  - platform: template
+    name: Power Minimum
+    lambda: return id(power_min_value);
+    update_interval: 5s
+    unit_of_measurement: W
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 1
+  - platform: template
+    name: Power Maximum
+    lambda: return id(power_max_value);
+    update_interval: 5s
+    unit_of_measurement: W
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 1
+
+button:
+  - platform: template
+    name: Reset Min Max
+    icon: mdi:backup-restore
+    on_press:
+      then:
+        - lambda: |-
+            id(voltage_min_value) = id(voltage).state;
+            id(voltage_max_value) = id(voltage).state;
+            id(current_min_value) = id(current).state;
+            id(current_max_value) = id(current).state;
+            id(power_min_value) = id(power).state;
+            id(power_max_value) = id(power).state;
+
+binary_sensor:
+  - platform: status
+    name: Status
+
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      name: IP Address
