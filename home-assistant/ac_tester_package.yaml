@@ -1,0 +1,26 @@
+# Copy this file to /config/packages/ac_tester.yaml and enable packages in
+# configuration.yaml. Change the source entity if HA generated a different ID.
+sensor:
+  - platform: statistics
+    name: AC-Tester Energy Last X Hours
+    unique_id: ac_tester_energy_last_x_hours
+    entity_id: sensor.ac_tester_energy_total
+    state_characteristic: change
+    max_age:
+      hours: 6  # X: choose the required rolling window
+    sampling_size: 10000
+    precision: 3
+
+utility_meter:
+  ac_tester_energy_daily:
+    name: AC-Tester Energy Calendar Day
+    unique_id: ac_tester_energy_calendar_day
+    source: sensor.ac_tester_energy_total
+    cycle: daily
+    periodically_resetting: false
+  ac_tester_energy_monthly:
+    name: AC-Tester Energy Calendar Month
+    unique_id: ac_tester_energy_calendar_month
+    source: sensor.ac_tester_energy_total
+    cycle: monthly
+    periodically_resetting: false
